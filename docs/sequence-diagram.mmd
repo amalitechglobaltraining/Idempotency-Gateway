@@ -1,0 +1,16 @@
+sequenceDiagram
+    participant Client
+    participant API
+    participant Store
+    Client->>API: POST /process-payment (Idempotency-Key, Body)
+    alt Key not seen before
+        API->>Store: Save key+body as processing
+        API-->>Client: (wait 2s) Process payment, respond 201
+        API->>Store: Save response for key
+    else Key seen, same body
+        API->>Store: Fetch response
+        API-->>Client: Return cached response (X-Cache-Hit: true)
+    else Key seen, different body
+        API-->>Client: 409/422 error (key reused)
+    end
+    Note over API,Store: In-flight requests block on first completion

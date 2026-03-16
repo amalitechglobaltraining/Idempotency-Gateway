@@ -1,0 +1,31 @@
+{
+  "name": "idempotency-gateway",
+  "version": "1.0.0",
+  "description": "This challenge is designed to test your ability to bridge Computer Science fundamentals with Modern Backend Engineering.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "test": "jest --runInBand"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dr-akoto/Idempotency-Gateway.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/dr-akoto/Idempotency-Gateway/issues"
+  },
+  "homepage": "https://github.com/dr-akoto/Idempotency-Gateway#readme",
+  "dependencies": {
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "jest": "^30.3.0",
+    "nodemon": "^3.1.14",
+    "supertest": "^7.2.2"
+  }
+}
