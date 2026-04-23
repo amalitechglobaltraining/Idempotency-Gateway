@@ -5,8 +5,14 @@ A RESTful idempotency layer that ensures payment requests are processed **exactl
 ---
 
 ## Architectural Diagram (Flow Chart)
+<img width="1569" height="2447" alt="Idempotency" src="https://github.com/user-attachments/assets/322b8b44-6b63-4a91-bc3b-6fd228846177" />
+
+---
 
 **In-flight race condition (Bonus):**
+---
+<img width="1485" height="526" alt="waiters" src="https://github.com/user-attachments/assets/2c003194-4830-4f9f-8ef5-ee1b04f2d768" />
+
 
 ---
 
