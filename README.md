@@ -152,24 +152,31 @@ curl -X POST http://localhost:3000/process-payment \
 
 ---
 
-## Developer's Choice: TTL Expiration for Idempotency Keys
+## Developer's Choice: Rate Limiting for Payment Protection
 
 **What I added:**  
-Stored idempotency records automatically expire after **24 hours**.
+I added rate limiting to the `/process-payment` endpoint using `express-rate-limit`.
 
-Each idempotency record is saved with a `createdAt` timestamp, and a cleanup process runs periodically to remove expired keys from the in-memory store.
+The API allows a maximum of **10 payment requests per minute** from the same client. If the limit is exceeded, the server returns:
+
+```json
+{
+  "error": "Too many payment requests, please slow down"
+}
+```
 
 ---
 
 **Why it matters in Fintech:**  
-Without expiration, idempotency keys would remain in memory indefinitely, causing the idempotency store to grow continuously over time.
+Even with idempotency protection in place, a payment endpoint is still vulnerable to abuse if clients can send unlimited requests in a short period of time.
 
-In a real payment system handling large volumes of transactions, this could lead to:
+Without rate limiting, this could lead to:
 
-- unnecessary memory consumption,
-- degraded performance,
-- stale transaction records remaining replayable forever.
+- accidental request flooding from buggy clients,
+- denial-of-service behavior from malicious users,
+- excessive strain on backend payment infrastructure,
+- increased fraud risk through rapid repeated payment attempts.
 
-Adding a TTL ensures that each idempotency key remains valid only within a safe retry window.
+Adding rate limiting protects the payment service by controlling how frequently requests can be made from a client within a fixed time window.
 
-This allows clients to safely retry failed requests while ensuring old records are automatically removed after the retry period expires.
+This improves system stability and introduces a basic abuse-prevention mechanism, which is especially important in financial systems where endpoints must be resilient against misuse.
