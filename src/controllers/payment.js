@@ -15,7 +15,7 @@ const payment = async(req,res) => {
     }
 
     // we simulate a 2 second delay
-    await new Promise(resolve => setTimeout(resolve), 2000)
+    await new Promise(resolve => setTimeout(resolve, 2000))
 
     return res.status(201).json({
         status: 'success',
