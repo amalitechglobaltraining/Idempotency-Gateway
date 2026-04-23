@@ -33,4 +33,12 @@ function updateEntry(key, patch){
     store.set(key, updated)
 }
 
+setInterval(() => {
+    for(const [key, value] of store.entries()){
+        if(Date.now() - value.createdAt > TTL_MS){
+            store.delete
+        }
+    }
+}, 60 * 1000)
+
 module.exports = {setEntry, getEntry, updateEntry}
