@@ -155,7 +155,21 @@ curl -X POST http://localhost:3000/process-payment \
 ## Developer's Choice: TTL Expiration for Idempotency Keys
 
 **What I added:**  
-Stored idempotency records automatically expire after 5 minutes.
+Stored idempotency records automatically expire after **24 hours**.
+
+Each idempotency record is saved with a `createdAt` timestamp, and a cleanup process runs periodically to remove expired keys from the in-memory store.
+
+---
 
 **Why it matters in Fintech:**  
-Without expiration, idempotency keys would remain in memory indefinitely, causing stale entries to accumulate and increasing memory usage over time. In a real payment processor handling thousands of requests, this could lead to memory exhaustion and degraded performance. Adding a TTL ensures that idempotency records remain available long enough for safe retries while automatically cleaning up old entries, similar to how Redis-based idempotency stores work in production systems.
+Without expiration, idempotency keys would remain in memory indefinitely, causing the idempotency store to grow continuously over time.
+
+In a real payment system handling large volumes of transactions, this could lead to:
+
+- unnecessary memory consumption,
+- degraded performance,
+- stale transaction records remaining replayable forever.
+
+Adding a TTL ensures that each idempotency key remains valid only within a safe retry window.
+
+This allows clients to safely retry failed requests while ensuring old records are automatically removed after the retry period expires.

@@ -36,7 +36,7 @@ function updateEntry(key, patch){
 setInterval(() => {
     for(const [key, value] of store.entries()){
         if(Date.now() - value.createdAt > TTL_MS){
-            store.delete
+            store.delete(key)
         }
     }
 }, 60 * 1000)
