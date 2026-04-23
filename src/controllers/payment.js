@@ -1,5 +1,5 @@
 
-const payment = (req,res) => {
+const payment = async(req,res) => {
     const {amount, currency} = req.body
 
     if(amount === undefined || currency === undefined){

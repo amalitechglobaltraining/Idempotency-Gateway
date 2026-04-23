@@ -4,4 +4,4 @@ const {payment} = require("../controllers/payment")
 
 router.post("/process-payment", idempotency, payment)
 
-module.exports = {router}
+module.exports = router
