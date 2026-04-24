@@ -107,7 +107,7 @@ X-Cache-Hit: true
 }
 ```
 
-**Response Header:**
+
 ---
 
 ### Scenario 3 — Same key, different body (fraud/error check)
@@ -142,13 +142,13 @@ curl -X POST http://localhost:3000/process-payment \
 
 ## Design Decisions
 
-**In-memory store with TTL:** Keys expire after 24 hours, matching Stripe's idempotency key lifetime. Easy to swap for Redis.
+**In-memory store with TTL:** The keys will expire within 24 hours, Easy to switch with Redis for production.
 
-**Body hashing (SHA-256):** Rather than comparing raw bodies, we hash and compare — efficient and tamper-evident. Keys are sorted so `{amount, currency}` and `{currency, amount}` are treated identically.
+**Body hashing (SHA-256):** Instead of comparing plain bodies, I hash and compare, which is efficient and tamper-proof. The keys are ordered such that `{amount, currency}` and `{currency, amount}` are the same.
 
-**Waiter queue for in-flight requests:** Concurrent identical requests don't spawn duplicate processes. The second request registers a callback and awaits the first request's completion, then returns the same result with `X-Cache-Hit: true`.
+**Waiter queue for in-flight requests:** Two identical concurrent requests do not create duplicate processes. The second request will wait for the first request's completion and return the same response along with `X-Cache-Hit: true`.
 
-**Response interception:** We wrap `res.json` to capture the response before it's sent, storing it for future replays. This keeps the payment route unaware of the caching layer.
+**Response interception:** Wrapping `res.json` allows us to intercept the response and cache it before it is sent. The payment route is oblivious about the caching mechanism.
 
 ---
 
