@@ -1,5 +1,6 @@
-import { Body, Controller, Headers, Post, Res } from '@nestjs/common';
+import { Body, Controller, Post, Res } from '@nestjs/common';
 import { Response } from 'express';
+import { IdempotencyKey } from '../common/idempotency-key.decorator';
 import { IdempotencyKeyPipe } from '../common/idempotency-key.pipe';
 import { IdempotencyService } from '../idempotency/idempotency.service';
 import { EMIT_INFLIGHT_CACHE_HIT } from '../idempotency/idempotency.constants';
@@ -22,7 +23,7 @@ export class PaymentController {
    */
   @Post('process-payment')
   async process(
-    @Headers('idempotency-key', IdempotencyKeyPipe) key: string,
+    @IdempotencyKey(IdempotencyKeyPipe) key: string,
     @Body() body: ProcessPaymentDto,
     @Res({ passthrough: true }) res: Response,
   ): Promise<unknown> {
