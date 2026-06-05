@@ -1,9 +1,15 @@
-import { HttpException, Injectable } from '@nestjs/common';
+import {
+  HttpException,
+  Injectable,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 import { fingerprint } from './body-fingerprint.util';
-import { CONFLICT_STATUS } from './idempotency.constants';
-
-const CONFLICT_MESSAGE =
-  'Idempotency key already used for a different request body.';
+import {
+  CONFLICT_STATUS,
+  SWEEP_INTERVAL_MS,
+  TTL_MS,
+} from './idempotency.constants';
 import {
   HandleResult,
   IdempotencyRecord,
@@ -11,15 +17,37 @@ import {
   StoredResponse,
 } from './idempotency.types';
 
+const CONFLICT_MESSAGE =
+  'Idempotency key already used for a different request body.';
+
 /**
  * The heart of the gateway. A single in-memory Map keyed by the (trimmed)
  * Idempotency-Key holds one record per key. `handle()` decides, from the record
- * state, whether to run the work once, replay a stored response, or (added in
- * later commits) block on an in-flight charge / reject a conflicting body.
+ * state, whether to run the work once, replay a stored response, block on an
+ * in-flight charge, or reject a conflicting body.
+ *
+ * Keys expire on a fixed window from first use (Stripe-style). Expiry is enforced
+ * lazily on read (authoritative) and by a background sweep (memory hygiene only).
  */
 @Injectable()
-export class IdempotencyService {
+export class IdempotencyService implements OnModuleInit, OnModuleDestroy {
   private readonly store = new Map<string, IdempotencyRecord>();
+  private readonly ttlMs = TTL_MS;
+  private readonly sweepIntervalMs = SWEEP_INTERVAL_MS;
+  private sweepTimer: NodeJS.Timeout | null = null;
+
+  onModuleInit(): void {
+    this.sweepTimer = setInterval(() => this.sweep(), this.sweepIntervalMs);
+    // Never keep the process (or a Jest run) alive just for the sweep.
+    this.sweepTimer.unref();
+  }
+
+  onModuleDestroy(): void {
+    if (this.sweepTimer) {
+      clearInterval(this.sweepTimer);
+      this.sweepTimer = null;
+    }
+  }
 
   /**
    * @param key    the validated, trimmed Idempotency-Key
@@ -37,7 +65,20 @@ export class IdempotencyService {
     // On Node's single-threaded event loop this get -> decide -> set runs to
     // completion with no interleaving, so two concurrent requests for the same
     // new key can never both reserve it. Do NOT introduce an await in here.
-    const record = this.store.get(key);
+    let record = this.store.get(key);
+
+    // Lazy TTL (authoritative): an expired, evictable record is dropped here so
+    // the same key behaves as brand new. We never evict a record that is still
+    // IN_FLIGHT or has parked waiters (see isEvictable) — that would risk a
+    // double-charge or stranding a waiter.
+    if (
+      record !== undefined &&
+      this.isExpired(record) &&
+      this.isEvictable(record)
+    ) {
+      this.store.delete(key);
+      record = undefined;
+    }
 
     if (record === undefined) {
       let resolveOuter!: (value: StoredResponse) => void;
@@ -67,7 +108,7 @@ export class IdempotencyService {
       fresh.completedAt = Date.now();
       resolveOuter(stored);
       fresh.inFlightPromise = null;
-      // rejectOuter is unused on the happy path; the failure path is added later.
+      // rejectOuter is unused on the happy path; the failure path is added next.
       void rejectOuter;
       return { response: stored, cacheHit: false };
     }
@@ -87,7 +128,7 @@ export class IdempotencyService {
     // Still IN_FLIGHT (a concurrent duplicate): block on the originator's shared
     // promise and replay its result once it settles — no second charge, no 409.
     // We capture the promise synchronously and bump waiterCount so the TTL sweep
-    // (added next) can never evict a record that still has parked waiters.
+    // can never evict a record that still has parked waiters.
     const inFlight = record.inFlightPromise!;
     record.waiterCount++;
     try {
@@ -96,5 +137,29 @@ export class IdempotencyService {
     } finally {
       record.waiterCount--;
     }
+  }
+
+  /** A key is expired TTL_MS after it was first reserved (fixed window, no sliding). */
+  private isExpired(rec: IdempotencyRecord): boolean {
+    return Date.now() - rec.createdAt >= this.ttlMs;
+  }
+
+  /** Only settled records with no parked waiters may be evicted by TTL. */
+  private isEvictable(rec: IdempotencyRecord): boolean {
+    return rec.state !== RecordState.IN_FLIGHT && rec.waiterCount === 0;
+  }
+
+  /** Background memory hygiene; correctness never depends on it running on time. */
+  private sweep(): void {
+    for (const [key, rec] of this.store) {
+      if (this.isExpired(rec) && this.isEvictable(rec)) {
+        this.store.delete(key);
+      }
+    }
+  }
+
+  /** Test/diagnostic helper: current number of stored keys. */
+  size(): number {
+    return this.store.size;
   }
 }
