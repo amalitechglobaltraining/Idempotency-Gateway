@@ -7,6 +7,7 @@ import {
 import { fingerprint } from './body-fingerprint.util';
 import {
   CONFLICT_STATUS,
+  IN_FLIGHT_TIMEOUT_MS,
   SWEEP_INTERVAL_MS,
   TTL_MS,
 } from './idempotency.constants';
@@ -34,6 +35,7 @@ export class IdempotencyService implements OnModuleInit, OnModuleDestroy {
   private readonly store = new Map<string, IdempotencyRecord>();
   private readonly ttlMs = TTL_MS;
   private readonly sweepIntervalMs = SWEEP_INTERVAL_MS;
+  private readonly inFlightTimeoutMs = IN_FLIGHT_TIMEOUT_MS;
   private sweepTimer: NodeJS.Timeout | null = null;
 
   onModuleInit(): void {
@@ -87,6 +89,10 @@ export class IdempotencyService implements OnModuleInit, OnModuleDestroy {
         resolveOuter = resolve;
         rejectOuter = reject;
       });
+      // Guard the shared promise so a failure with ZERO waiters can never surface
+      // as an unhandledRejection (which would crash the process / fail tests).
+      // Real waiters still receive the rejection through their own await.
+      inFlightPromise.catch(() => undefined);
 
       const fresh: IdempotencyRecord = {
         key,
@@ -102,15 +108,25 @@ export class IdempotencyService implements OnModuleInit, OnModuleDestroy {
       this.store.set(key, fresh);
       // ---- END CRITICAL SECTION ----
 
-      const stored = await doWork();
-      fresh.state = RecordState.COMPLETED;
-      fresh.response = stored;
-      fresh.completedAt = Date.now();
-      resolveOuter(stored);
-      fresh.inFlightPromise = null;
-      // rejectOuter is unused on the happy path; the failure path is added next.
-      void rejectOuter;
-      return { response: stored, cacheHit: false };
+      try {
+        const stored = await this.runWithWatchdog(doWork);
+        fresh.state = RecordState.COMPLETED;
+        fresh.response = stored;
+        fresh.completedAt = Date.now();
+        resolveOuter(stored);
+        return { response: stored, cacheHit: false };
+      } catch (err) {
+        // Never cache a failure as a success. Reject the shared promise so every
+        // parked waiter fails together, then DELETE the key so a retry runs fresh
+        // (at-least-once on failure, exactly-once on success).
+        fresh.state = RecordState.FAILED;
+        fresh.error = { message: this.errorMessage(err) };
+        rejectOuter(err);
+        this.store.delete(key);
+        throw err;
+      } finally {
+        fresh.inFlightPromise = null;
+      }
     }
 
     // A record already exists for this key.
@@ -137,6 +153,35 @@ export class IdempotencyService implements OnModuleInit, OnModuleDestroy {
     } finally {
       record.waiterCount--;
     }
+  }
+
+  /**
+   * Run the charge but reject if it exceeds IN_FLIGHT_TIMEOUT_MS. Because an
+   * IN_FLIGHT record is never evicted by TTL, a hung charge would otherwise pin
+   * its key forever; the watchdog turns that into a normal failure (key freed,
+   * 500 returned, retryable). The timer is unref'd and always cleared on settle.
+   */
+  private runWithWatchdog(
+    doWork: () => Promise<StoredResponse>,
+  ): Promise<StoredResponse> {
+    let timer: NodeJS.Timeout;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () =>
+          reject(
+            new Error(
+              `Charge exceeded IN_FLIGHT_TIMEOUT_MS (${this.inFlightTimeoutMs}ms)`,
+            ),
+          ),
+        this.inFlightTimeoutMs,
+      );
+      timer.unref();
+    });
+    return Promise.race([doWork(), timeout]).finally(() => clearTimeout(timer));
+  }
+
+  private errorMessage(err: unknown): string {
+    return err instanceof Error ? err.message : String(err);
   }
 
   /** A key is expired TTL_MS after it was first reserved (fixed window, no sliding). */
