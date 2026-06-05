@@ -1,10 +1,11 @@
 import { Module } from '@nestjs/common';
+import { PaymentController } from './payment/payment.controller';
+import { PaymentService } from './payment/payment.service';
+import { IdempotencyService } from './idempotency/idempotency.service';
 
-// Controllers and providers are wired in as later commits introduce them
-// (PaymentController + IdempotencyService). The scaffold boots as an empty app.
 @Module({
   imports: [],
-  controllers: [],
-  providers: [],
+  controllers: [PaymentController],
+  providers: [IdempotencyService, PaymentService],
 })
 export class AppModule {}
