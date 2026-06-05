@@ -1,5 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { HttpException, Injectable } from '@nestjs/common';
 import { fingerprint } from './body-fingerprint.util';
+import { CONFLICT_STATUS } from './idempotency.constants';
+
+const CONFLICT_MESSAGE =
+  'Idempotency key already used for a different request body.';
 import {
   HandleResult,
   IdempotencyRecord,
@@ -69,6 +73,12 @@ export class IdempotencyService {
     }
 
     // A record already exists for this key.
+    // Same key but a DIFFERENT body is a misuse (or a fraud/error signal) — reject
+    // it rather than replaying someone else's charge. Synchronous, no waiting.
+    if (record.requestFingerprint !== fp) {
+      throw new HttpException(CONFLICT_MESSAGE, CONFLICT_STATUS);
+    }
+
     if (record.state === RecordState.COMPLETED) {
       // Duplicate of a finished request: replay the saved response, no work.
       return { response: record.response as StoredResponse, cacheHit: true };
