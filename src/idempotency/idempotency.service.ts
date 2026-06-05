@@ -1,6 +1,8 @@
 import {
   HttpException,
+  Inject,
   Injectable,
+  Optional,
   OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
@@ -21,6 +23,14 @@ import {
 const CONFLICT_MESSAGE =
   'Idempotency key already used for a different request body.';
 
+/** DI token + shape for overriding timings (defaults come from idempotency.constants). */
+export const IDEMPOTENCY_OPTIONS = 'IDEMPOTENCY_OPTIONS';
+export interface IdempotencyOptions {
+  ttlMs?: number;
+  sweepIntervalMs?: number;
+  inFlightTimeoutMs?: number;
+}
+
 /**
  * The heart of the gateway. A single in-memory Map keyed by the (trimmed)
  * Idempotency-Key holds one record per key. `handle()` decides, from the record
@@ -33,10 +43,20 @@ const CONFLICT_MESSAGE =
 @Injectable()
 export class IdempotencyService implements OnModuleInit, OnModuleDestroy {
   private readonly store = new Map<string, IdempotencyRecord>();
-  private readonly ttlMs = TTL_MS;
-  private readonly sweepIntervalMs = SWEEP_INTERVAL_MS;
-  private readonly inFlightTimeoutMs = IN_FLIGHT_TIMEOUT_MS;
+  private readonly ttlMs: number;
+  private readonly sweepIntervalMs: number;
+  private readonly inFlightTimeoutMs: number;
   private sweepTimer: NodeJS.Timeout | null = null;
+
+  constructor(
+    @Optional()
+    @Inject(IDEMPOTENCY_OPTIONS)
+    options: IdempotencyOptions = {},
+  ) {
+    this.ttlMs = options?.ttlMs ?? TTL_MS;
+    this.sweepIntervalMs = options?.sweepIntervalMs ?? SWEEP_INTERVAL_MS;
+    this.inFlightTimeoutMs = options?.inFlightTimeoutMs ?? IN_FLIGHT_TIMEOUT_MS;
+  }
 
   onModuleInit(): void {
     this.sweepTimer = setInterval(() => this.sweep(), this.sweepIntervalMs);
