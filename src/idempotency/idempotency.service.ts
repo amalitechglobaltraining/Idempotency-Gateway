@@ -85,8 +85,16 @@ export class IdempotencyService {
     }
 
     // Still IN_FLIGHT (a concurrent duplicate): block on the originator's shared
-    // promise and replay its result once it settles — no second charge.
-    const stored = await record.inFlightPromise!;
-    return { response: stored, cacheHit: true };
+    // promise and replay its result once it settles — no second charge, no 409.
+    // We capture the promise synchronously and bump waiterCount so the TTL sweep
+    // (added next) can never evict a record that still has parked waiters.
+    const inFlight = record.inFlightPromise!;
+    record.waiterCount++;
+    try {
+      const stored = await inFlight;
+      return { response: stored, cacheHit: true };
+    } finally {
+      record.waiterCount--;
+    }
   }
 }
