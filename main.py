@@ -25,6 +25,9 @@ class StoredResponse(BaseModel):
 # in-memory store
 idempotency_store: dict[str, StoredResponse] = {}
 
+# one asyncio.Lock per idempotency key — keeps concurrent identical requests serialised
+in_flight_locks: dict[str, asyncio.Lock] = {}
+
 
 def hash_body(body: dict) -> str:
     """Return a stable SHA-256 fingerprint of a dict (order-independent)."""
@@ -41,37 +44,42 @@ def read_root():
 async def process_payment(
     payment: PaymentRequest,
     idempotency_key: str = Header(..., alias="Idempotency-Key"),
-): 
+):
     incoming_hash = hash_body(payment.model_dump())
 
-    # --- Idempotency check ---
-    if idempotency_key in idempotency_store:
-        stored = idempotency_store[idempotency_key]
+    # Create a lock for this key if one doesn't exist yet
+    if idempotency_key not in in_flight_locks:
+        in_flight_locks[idempotency_key] = asyncio.Lock()
 
-        if stored.request_hash != incoming_hash:
-            raise HTTPException(
-                status_code=422,
-                detail="Idempotency key already used for a different request body.",
-            )
+    async with in_flight_locks[idempotency_key]:
+        # --- Idempotency check (must live INSIDE the lock) ---
+        if idempotency_key in idempotency_store:
+            stored = idempotency_store[idempotency_key]
 
-        response = JSONResponse(content=stored.body, status_code=stored.status_code)
-        response.headers["X-Cache-Hit"] = "true"
-        return response
+            if stored.request_hash != incoming_hash:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Idempotency key already used for a different request body.",
+                )
 
-    # Simulate payment processing (2-second delay)
-    await asyncio.sleep(2)
-    result = {
-        "status": "success",
-        "message": f"Charged {payment.amount} {payment.currency}",
-    }
+            response = JSONResponse(content=stored.body, status_code=stored.status_code)
+            response.headers["X-Cache-Hit"] = "true"
+            return response
 
-    idempotency_store[idempotency_key] = StoredResponse(
-        status_code=201,
-        body=result,
-        request_hash=incoming_hash,
-    )
+        # Simulate payment processing (2-second delay)
+        await asyncio.sleep(2)
+        result = {
+            "status": "success",
+            "message": f"Charged {payment.amount} {payment.currency}",
+        }
 
-    return result
+        idempotency_store[idempotency_key] = StoredResponse(
+            status_code=201,
+            body=result,
+            request_hash=incoming_hash,
+        )
+
+        return result
 
 
 
