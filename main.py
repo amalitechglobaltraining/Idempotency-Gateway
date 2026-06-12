@@ -44,8 +44,19 @@ async def process_payment(
 ): 
     incoming_hash = hash_body(payment.model_dump())
 
-    # idempotency key-check 
+    # --- Idempotency check ---
+    if idempotency_key in idempotency_store:
+        stored = idempotency_store[idempotency_key]
 
+        if stored.request_hash != incoming_hash:
+            raise HTTPException(
+                status_code=422,
+                detail="Idempotency key already used for a different request body.",
+            )
+
+        response = JSONResponse(content=stored.body, status_code=stored.status_code)
+        response.headers["X-Cache-Hit"] = "true"
+        return response
 
     # Simulate payment processing (2-second delay)
     await asyncio.sleep(2)
@@ -60,4 +71,7 @@ async def process_payment(
         request_hash=incoming_hash,
     )
 
-    return result 
+    return result
+
+
+
