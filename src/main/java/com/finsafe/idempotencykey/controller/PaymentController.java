@@ -1,24 +1,31 @@
 package com.finsafe.idempotencykey.controller;
 
-import com.finsafe.idempotencykey.model.PaymentRequest;
+import com.finsafe.idempotencykey.model.*;
+import com.finsafe.idempotencykey.service.PaymentService;
+import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
 public class PaymentController {
 
+    private final PaymentService service;
+
+    public PaymentController(PaymentService service) {
+        this.service = service;
+    }
+
     @PostMapping("/process-payment")
-    public String processPayment(
-            @RequestHeader("Idempotency-Key") String idempotencyKey,
+    public ResponseEntity<?> processPayment(
+            @RequestHeader("Idempotency-Key") String key,
             @RequestBody PaymentRequest request
     ) {
 
         try {
-            // simulate payment processing delay
-            Thread.sleep(2000);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+            return ResponseEntity.ok(service.processPayment(key, request));
+        } catch (RuntimeException e) {
+            return ResponseEntity
+                    .status(HttpStatus.CONFLICT)
+                    .body(e.getMessage());
         }
-
-        return "Charged " + request.getAmount() + " " + request.getCurrency();
     }
 }
