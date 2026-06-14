@@ -1,4 +1,4 @@
-package com.fredoo.idempotencykey;
+package com.finsafe.idempotencykey;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
