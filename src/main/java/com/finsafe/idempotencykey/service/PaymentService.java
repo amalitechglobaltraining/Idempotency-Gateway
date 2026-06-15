@@ -1,6 +1,7 @@
 package com.finsafe.idempotencykey.service;
 
 import com.finsafe.idempotencykey.model.*;
+import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 
 import java.util.concurrent.ConcurrentHashMap;
@@ -10,24 +11,13 @@ public class PaymentService {
 
     private final ConcurrentHashMap<String, IdempotencyRecord> store = new ConcurrentHashMap<>();
 
-    public PaymentResponse processPayment(String key, PaymentRequest request) {
+    public ResponseEntity<PaymentResponse> processPayment(String key, PaymentRequest request) {
 
-        String requestHash = request.getAmount() + "-" + request.getCurrency();
+        String hash = request.getAmount() + "-" + request.getCurrency();
 
-        // If key exists
+        // duplicate request
         if (store.containsKey(key)) {
-
-            IdempotencyRecord existing = store.get(key);
-
-            // same key but different request → reject
-            if (!existing.getRequestHash().equals(requestHash)) {
-                throw new RuntimeException(
-                        "Idempotency key already used for a different request body."
-                );
-            }
-
-            // same request → return cached response
-            return existing.getResponse();
+            return store.get(key).getResponse();
         }
 
         // simulate processing
@@ -37,12 +27,19 @@ public class PaymentService {
             Thread.currentThread().interrupt();
         }
 
-        PaymentResponse response = new PaymentResponse(
+        PaymentResponse body = new PaymentResponse(
                 "Charged " + request.getAmount() + " " + request.getCurrency()
         );
 
-        store.put(key, new IdempotencyRecord(requestHash, response));
+        ResponseEntity<PaymentResponse> response =
+                ResponseEntity.status(HttpStatus.CREATED).body(body);
+
+        store.put(key, new IdempotencyRecord(hash, response));
 
         return response;
+    }
+
+    public boolean isReplay(String key) {
+        return store.containsKey(key);
     }
 }

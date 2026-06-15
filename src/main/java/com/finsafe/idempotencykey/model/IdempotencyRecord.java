@@ -1,11 +1,13 @@
 package com.finsafe.idempotencykey.model;
 
+import org.springframework.http.ResponseEntity;
+
 public class IdempotencyRecord {
 
     private final String requestHash;
-    private final PaymentResponse response;
+    private final ResponseEntity<PaymentResponse> response;
 
-    public IdempotencyRecord(String requestHash, PaymentResponse response) {
+    public IdempotencyRecord(String requestHash, ResponseEntity<PaymentResponse> response) {
         this.requestHash = requestHash;
         this.response = response;
     }
@@ -14,7 +16,7 @@ public class IdempotencyRecord {
         return requestHash;
     }
 
-    public PaymentResponse getResponse() {
+    public ResponseEntity<PaymentResponse> getResponse() {
         return response;
     }
 }

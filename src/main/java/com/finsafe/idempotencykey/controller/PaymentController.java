@@ -20,12 +20,18 @@ public class PaymentController {
             @RequestBody PaymentRequest request
     ) {
 
-        try {
-            return ResponseEntity.ok(service.processPayment(key, request));
-        } catch (RuntimeException e) {
-            return ResponseEntity
-                    .status(HttpStatus.CONFLICT)
-                    .body(e.getMessage());
-        }
+        boolean isReplay = service.isReplay(key);
+
+        ResponseEntity<PaymentResponse> response =
+                service.processPayment(key, request);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.add("X-Cache-Hit", String.valueOf(isReplay));
+
+        return new ResponseEntity<>(
+                response.getBody(),
+                headers,
+                response.getStatusCode()
+        );
     }
 }
