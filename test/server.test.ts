@@ -1,5 +1,6 @@
 import request from 'supertest';
 import type { Server } from 'node:http';
+import { spawnSync } from 'node:child_process';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -10,6 +11,21 @@ afterEach(() => {
 });
 
 describe('startServer', () => {
+  it('reports invalid direct startup configuration without a stack trace', () => {
+    const result = spawnSync(process.execPath, ['--import', 'tsx', 'src/server.ts'], {
+      cwd: process.cwd(),
+      env: { ...process.env, PORT: 'not-a-port' },
+      encoding: 'utf8',
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/^Failed to start idempotency gateway:/);
+    expect(result.stderr).toContain('PORT must be ASCII decimal digits from 0 to 65535.');
+    expect(result.stderr).not.toContain(' at ');
+    expect(result.stderr).not.toContain('src/server.ts');
+    expect(result.stderr).not.toContain(process.cwd());
+  });
+
   it('starts a listening HTTP server that reports health', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => undefined);
     const server = startServer(0);

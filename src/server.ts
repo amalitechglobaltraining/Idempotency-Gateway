@@ -71,12 +71,22 @@ export function createServerLifecycle(
   };
 }
 
+function runDirectServer(): void {
+  try {
+    const server = startServer();
+    const lifecycle = createServerLifecycle(server);
+
+    server.once('error', lifecycle.handleError);
+    process.once('SIGINT', lifecycle.shutdown);
+    process.once('SIGTERM', lifecycle.shutdown);
+  } catch (error) {
+    const message = error instanceof Error ? error.message.replace(/[\r\n]+/g, ' ') : 'Unknown startup error.';
+    console.error(`Failed to start idempotency gateway: ${message}`);
+    process.exitCode = 1;
+  }
+}
+
 // Keep process lifecycle hooks out of modules that import the server for tests or composition.
 if (require.main === module) {
-  const server = startServer();
-  const lifecycle = createServerLifecycle(server);
-
-  server.once('error', lifecycle.handleError);
-  process.once('SIGINT', lifecycle.shutdown);
-  process.once('SIGTERM', lifecycle.shutdown);
+  runDirectServer();
 }
