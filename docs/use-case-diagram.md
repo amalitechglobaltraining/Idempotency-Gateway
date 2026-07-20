@@ -7,12 +7,15 @@ This diagram describes the gateway's externally visible payment, retry, health, 
 The Mermaid source below is the editable version of the diagram.
 
 ```mermaid
-flowchart LR
+flowchart TB
     Client[API Client]
     Operations[Operations / Maintenance]
+    Client ~~~ Operations
 
     subgraph Gateway[Idempotency Gateway]
         direction TB
+        ClientEntry((API request))
+        MaintenanceEntry((Maintenance hook))
         Submit([Submit payment<br/>POST /process-payment])
         Retry([Retry payment safely])
         Replay([Replay completed response<br/>X-Cache-Hit: true])
@@ -22,12 +25,16 @@ flowchart LR
         Cleanup([Delete expired completed records<br/>Optional; no scheduler is wired])
     end
 
-    Client --> Submit
-    Client --> Retry
-    Client --> Health
-    Operations --> Cleanup
+    Client --> ClientEntry
+    Operations --> MaintenanceEntry
+    ClientEntry --> Submit
+    ClientEntry --> Retry
+    ClientEntry --> Health
+    MaintenanceEntry --> Cleanup
 
     Retry -. completed request .-> Replay
     Retry -. identical request still in flight .-> Wait
     Retry -. same key, different payment .-> Conflict
+
+    style Gateway fill:#ffffff,fill-opacity:0
 ```
