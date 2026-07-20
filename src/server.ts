@@ -2,7 +2,30 @@ import type { Server } from 'node:http';
 
 import { createApp } from './app.js';
 
-export function startServer(port = Number(process.env.PORT ?? 3000)): Server {
+const invalidEnvironmentPortMessage = 'PORT must be ASCII decimal digits from 0 to 65535.';
+
+interface LifecycleDependencies {
+  exit?: (code: number) => unknown;
+  logError?: (message: string) => void;
+}
+
+export function resolvePort(value: string | undefined): number {
+  if (value === undefined || value.trim() === '') {
+    return 3000;
+  }
+  if (!/^[0-9]+$/.test(value)) {
+    throw new Error(invalidEnvironmentPortMessage);
+  }
+
+  const port = Number(value);
+  if (!Number.isInteger(port) || port > 65535) {
+    throw new Error(invalidEnvironmentPortMessage);
+  }
+
+  return port;
+}
+
+export function startServer(port = resolvePort(process.env.PORT)): Server {
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
     throw new Error('Port must be an integer between 0 and 65535.');
   }
@@ -16,20 +39,44 @@ export function startServer(port = Number(process.env.PORT ?? 3000)): Server {
   return server;
 }
 
+export function createServerLifecycle(
+  server: Pick<Server, 'close'>,
+  dependencies: LifecycleDependencies = {},
+) {
+  const exit = dependencies.exit ?? process.exit;
+  const logError = dependencies.logError ?? console.error;
+  let shuttingDown = false;
+
+  return {
+    shutdown() {
+      if (shuttingDown) return;
+      shuttingDown = true;
+
+      server.close((error) => {
+        if (error) {
+          logError(`Failed to close idempotency gateway: ${error.message}`);
+          exit(1);
+          return;
+        }
+
+        exit(0);
+      });
+    },
+    handleError(error: Error) {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      logError(`Failed to start idempotency gateway: ${error.message}`);
+      exit(1);
+    },
+  };
+}
+
 // Keep process lifecycle hooks out of modules that import the server for tests or composition.
 if (require.main === module) {
   const server = startServer();
-  const shutdown = () => {
-    server.close((error) => {
-      if (error) {
-        console.error(`Failed to close idempotency gateway: ${error.message}`);
-        process.exit(1);
-      }
+  const lifecycle = createServerLifecycle(server);
 
-      process.exit(0);
-    });
-  };
-
-  process.once('SIGINT', shutdown);
-  process.once('SIGTERM', shutdown);
+  server.once('error', lifecycle.handleError);
+  process.once('SIGINT', lifecycle.shutdown);
+  process.once('SIGTERM', lifecycle.shutdown);
 }
