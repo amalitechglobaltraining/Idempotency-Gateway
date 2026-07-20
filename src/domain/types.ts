@@ -12,15 +12,15 @@ export interface PaymentResponse {
 }
 
 export interface ProcessingRecord {
-  key: string;
-  hash: string;
+  idempotencyKey: string;
+  requestHash: string;
   status: 'PROCESSING';
   createdAt: number;
 }
 
 export interface CompletedRecord {
-  key: string;
-  hash: string;
+  idempotencyKey: string;
+  requestHash: string;
   status: 'COMPLETED';
   responseStatus: number;
   responseBody: unknown;

@@ -7,43 +7,43 @@ export class InMemoryIdempotencyRepository {
 
   constructor(private readonly now: () => number = Date.now) {}
 
-  find(key: string): IdempotencyRecord | undefined {
-    const record = this.records.get(key);
+  find(idempotencyKey: string): IdempotencyRecord | undefined {
+    const record = this.records.get(idempotencyKey);
 
     // Active processing ownership must never lapse while work may still complete.
     if (record?.status === 'COMPLETED' && record.expiresAt <= this.now()) {
-      this.records.delete(key);
+      this.records.delete(idempotencyKey);
       return undefined;
     }
 
     return record;
   }
 
-  claim(key: string, hash: string): boolean {
+  claim(idempotencyKey: string, requestHash: string): boolean {
     // This synchronous check-and-set grants one owner within a single Node process.
-    if (this.find(key)) {
+    if (this.find(idempotencyKey)) {
       return false;
     }
 
-    this.records.set(key, {
-      key,
-      hash,
+    this.records.set(idempotencyKey, {
+      idempotencyKey,
+      requestHash,
       status: 'PROCESSING',
       createdAt: this.now(),
     });
     return true;
   }
 
-  complete(key: string, responseStatus: number, responseBody: unknown): void {
-    const existing = this.records.get(key);
+  complete(idempotencyKey: string, responseStatus: number, responseBody: unknown): void {
+    const existing = this.records.get(idempotencyKey);
     if (!existing) {
       throw new Error('Cannot complete an idempotency record that does not exist');
     }
 
     const completedAt = this.now();
     const completed: CompletedRecord = {
-      key: existing.key,
-      hash: existing.hash,
+      idempotencyKey: existing.idempotencyKey,
+      requestHash: existing.requestHash,
       status: 'COMPLETED',
       responseStatus,
       responseBody,
@@ -51,7 +51,7 @@ export class InMemoryIdempotencyRepository {
       completedAt,
       expiresAt: completedAt + COMPLETED_RECORD_RETENTION_MS,
     };
-    this.records.set(key, completed);
+    this.records.set(idempotencyKey, completed);
   }
 
   deleteExpired(): number {

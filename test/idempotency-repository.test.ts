@@ -18,6 +18,8 @@ describe('InMemoryIdempotencyRepository', () => {
     repository.complete('payment-1', 201, responseBody);
 
     expect(repository.find('payment-1')).toMatchObject({
+      idempotencyKey: 'payment-1',
+      requestHash: 'hash-1',
       status: 'COMPLETED',
       responseStatus: 201,
       responseBody,
