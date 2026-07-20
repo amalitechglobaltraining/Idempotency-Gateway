@@ -29,8 +29,8 @@ An operations or maintenance actor is connected to expired-record cleanup. The d
 
 Five separate diagrams keep each behavioral path readable:
 
-1. **First request:** validate and hash the payment, claim a `PROCESSING` record, register the in-flight operation, process the payment once, store the completed response, and return `201` with `Idempotency-Replayed: false`.
-2. **Completed replay:** find a matching `COMPLETED` record and immediately return the stored status, headers, and body with `Idempotency-Replayed: true`.
+1. **First request:** validate and hash the payment, claim a `PROCESSING` record, register the in-flight operation, process the payment once, store the completed response, and return `201` with `X-Cache-Hit: false`.
+2. **Completed replay:** find a matching `COMPLETED` record and immediately return the stored status and body with `X-Cache-Hit: true`.
 3. **Concurrent identical requests:** the first request owns processing; the second finds the matching `PROCESSING` record and waits on the in-memory operation; both receive the same result while the payment processor runs once.
 4. **Payload conflict:** a request reuses an existing key with a different canonical payment hash and receives `409` without invoking the payment processor.
 5. **Failure and retry:** processing fails, the conditional `PROCESSING` claim is released, current callers receive `500`, and a later request can claim the key and retry.
