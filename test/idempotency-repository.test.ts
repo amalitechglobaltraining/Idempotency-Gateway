@@ -118,4 +118,32 @@ describe('InMemoryIdempotencyRepository', () => {
       'Cannot complete an idempotency record that does not exist',
     );
   });
+
+  it('releases a processing claim owned by the matching request hash', () => {
+    const repository = new InMemoryIdempotencyRepository(() => 1_000);
+    repository.claim('payment-1', 'hash-1');
+
+    expect(repository.releaseProcessing('payment-1', 'hash-1')).toBe(true);
+    expect(repository.find('payment-1')).toBeUndefined();
+  });
+
+  it('does not release a processing claim owned by a different request hash', () => {
+    const repository = new InMemoryIdempotencyRepository(() => 1_000);
+    repository.claim('payment-1', 'hash-1');
+
+    expect(repository.releaseProcessing('payment-1', 'hash-2')).toBe(false);
+    expect(repository.find('payment-1')).toMatchObject({
+      status: 'PROCESSING',
+      requestHash: 'hash-1',
+    });
+  });
+
+  it('does not release a completed record', () => {
+    const repository = new InMemoryIdempotencyRepository(() => 1_000);
+    repository.claim('payment-1', 'hash-1');
+    repository.complete('payment-1', 201, { transactionId: 'txn-1' });
+
+    expect(repository.releaseProcessing('payment-1', 'hash-1')).toBe(false);
+    expect(repository.find('payment-1')).toMatchObject({ status: 'COMPLETED' });
+  });
 });

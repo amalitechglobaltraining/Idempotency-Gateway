@@ -7,13 +7,21 @@ import type {
 import { fingerprint } from '../domain/request-fingerprint.js';
 import { InMemoryIdempotencyRepository } from '../storage/idempotency-repository.js';
 
-const conflictResult: OperationResult = {
-  statusCode: 409,
-  body: { error: 'Idempotency key already used for a different request body.' },
-  cacheHit: false,
-};
+function conflictResult(): OperationResult {
+  return {
+    statusCode: 409,
+    body: { error: 'Idempotency key already used for a different request body.' },
+    cacheHit: false,
+  };
+}
+
+function isolateResult(result: OperationResult, cacheHit = result.cacheHit): OperationResult {
+  // Each caller receives a body isolated from shared in-flight and stored snapshots.
+  return { statusCode: result.statusCode, body: structuredClone(result.body), cacheHit };
+}
 
 export class PaymentService {
+  // A repository's in-flight coordination belongs to one app-composed service instance.
   private readonly inFlight = new Map<string, Promise<OperationResult>>();
 
   constructor(
@@ -38,11 +46,11 @@ export class PaymentService {
     }
 
     // Publish the shared promise before this request yields to a duplicate.
-    const owned = this.runOwned(idempotencyKey, payment);
+    const owned = this.runOwned(idempotencyKey, requestHash, payment);
     this.inFlight.set(idempotencyKey, owned);
 
     try {
-      return await owned;
+      return isolateResult(await owned);
     } finally {
       // Do not let completed operations accumulate in process memory.
       this.inFlight.delete(idempotencyKey);
@@ -54,15 +62,15 @@ export class PaymentService {
     requestHash: string,
   ): Promise<OperationResult> {
     if (existing.requestHash !== requestHash) {
-      return conflictResult;
+      return conflictResult();
     }
 
     if (existing.status === 'COMPLETED') {
-      return {
+      return isolateResult({
         statusCode: existing.responseStatus,
         body: existing.responseBody,
         cacheHit: true,
-      };
+      });
     }
 
     const owned = this.inFlight.get(existing.idempotencyKey);
@@ -72,15 +80,22 @@ export class PaymentService {
 
     // All identical duplicates observe the owner's exact outcome.
     const result = await owned;
-    return { ...result, cacheHit: true };
+    return isolateResult(result, true);
   }
 
   private async runOwned(
     idempotencyKey: string,
+    requestHash: string,
     payment: PaymentRequest,
   ): Promise<OperationResult> {
-    const response = await this.processPayment(payment);
-    this.repository.complete(idempotencyKey, 201, response);
-    return { statusCode: 201, body: response, cacheHit: false };
+    try {
+      const response = structuredClone(await this.processPayment(payment));
+      this.repository.complete(idempotencyKey, 201, response);
+      return { statusCode: 201, body: response, cacheHit: false };
+    } catch (error) {
+      // Release only the claim still owned by this failed request.
+      this.repository.releaseProcessing(idempotencyKey, requestHash);
+      throw error;
+    }
   }
 }

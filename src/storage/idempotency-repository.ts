@@ -34,6 +34,16 @@ export class InMemoryIdempotencyRepository {
     return true;
   }
 
+  releaseProcessing(idempotencyKey: string, requestHash: string): boolean {
+    const existing = this.records.get(idempotencyKey);
+    if (existing?.status !== 'PROCESSING' || existing.requestHash !== requestHash) {
+      return false;
+    }
+
+    this.records.delete(idempotencyKey);
+    return true;
+  }
+
   complete(idempotencyKey: string, responseStatus: number, responseBody: unknown): void {
     const existing = this.records.get(idempotencyKey);
     if (!existing) {
