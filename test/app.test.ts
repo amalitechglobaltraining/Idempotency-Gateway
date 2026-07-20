@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { PaymentRequest, PaymentResponse } from '../src/domain/types.js';
 import { createApp } from '../src/app.js';
+import { validateIdempotencyKey } from '../src/http/validation.js';
 
 const response: PaymentResponse = {
   transactionId: 'transaction-123',
@@ -44,10 +45,14 @@ describe('HTTP API', () => {
     ['zero amount', { amount: 0, currency: 'USD' }],
     ['negative amount', { amount: -1, currency: 'USD' }],
     ['non-number amount', { amount: '100', currency: 'USD' }],
+    ['boolean amount', { amount: true, currency: 'USD' }],
+    ['object amount', { amount: {}, currency: 'USD' }],
     ['missing amount', { currency: 'USD' }],
     ['lowercase currency', { amount: 100, currency: 'usd' }],
     ['two-letter currency', { amount: 100, currency: 'US' }],
+    ['four-letter currency', { amount: 100, currency: 'USDD' }],
     ['missing currency', { amount: 100 }],
+    ['array body', []],
   ])('rejects payment with %s without running the simulator', async (_name, body) => {
     const processPayment = vi.fn<(payment: PaymentRequest) => Promise<PaymentResponse>>();
     const result = await request(createApp({ processPayment }))
@@ -57,6 +62,46 @@ describe('HTTP API', () => {
 
     expect(result.status).toBe(400);
     expect(result.body).toEqual({ error: 'A valid payment with amount and currency is required.' });
+    expect(processPayment).not.toHaveBeenCalled();
+  });
+
+  it('rejects a null JSON body without running the simulator', async () => {
+    const processPayment = vi.fn<(payment: PaymentRequest) => Promise<PaymentResponse>>();
+    const result = await request(createApp({ processPayment }))
+      .post('/process-payment')
+      .set('Idempotency-Key', 'valid-key')
+      .set('Content-Type', 'application/json')
+      .send('null');
+
+    expect(result.status).toBe(400);
+    expect(processPayment).not.toHaveBeenCalled();
+  });
+
+  it('accepts an idempotency key at the 255-character raw boundary', async () => {
+    const processPayment = vi.fn(async () => response);
+    const result = await request(createApp({ processPayment }))
+      .post('/process-payment')
+      .set('Idempotency-Key', 'a'.repeat(255))
+      .send({ amount: 100, currency: 'USD' });
+
+    expect(result.status).toBe(201);
+    expect(processPayment).toHaveBeenCalledOnce();
+  });
+
+  it('applies the 255-character limit before trimming the raw key', () => {
+    expect(validateIdempotencyKey(` ${'a'.repeat(254)} `)).toBeUndefined();
+    expect(validateIdempotencyKey('a'.repeat(255))).toBe('a'.repeat(255));
+  });
+
+  it('rejects duplicate Idempotency-Key field occurrences', async () => {
+    const processPayment = vi.fn(async () => response);
+    const result = await request(createApp({ processPayment }))
+      .post('/process-payment')
+      .set('Idempotency-Key', ['key-1', 'key-2'] as unknown as string)
+      .send({ amount: 100, currency: 'USD' });
+
+    expect(result.status).toBe(400);
+    expect(result.body).toEqual({ error: 'A valid Idempotency-Key header is required.' });
     expect(processPayment).not.toHaveBeenCalled();
   });
 
@@ -95,6 +140,33 @@ describe('HTTP API', () => {
 
     expect(result.status).toBe(400);
     expect(result.body).toEqual({ error: 'Request body must be valid JSON.' });
+  });
+
+  it('returns a distinct safe error for JSON over 100kb', async () => {
+    const result = await request(createApp())
+      .post('/process-payment')
+      .set('Idempotency-Key', 'payment-1')
+      .send({ amount: 100, currency: 'USD', padding: 'x'.repeat(101 * 1024) });
+
+    expect(result.status).toBe(413);
+    expect(result.body).toEqual({ error: 'Request body is too large.' });
+  });
+
+  it('does not misclassify an unrelated SyntaxError carrying a body', async () => {
+    const processPayment = vi.fn(async () => {
+      const error = new SyntaxError('processor parser detail') as SyntaxError & { body: string };
+      error.body = 'internal processor body';
+      throw error;
+    });
+    const result = await request(createApp({ processPayment }))
+      .post('/process-payment')
+      .set('Idempotency-Key', 'payment-1')
+      .send({ amount: 100, currency: 'USD' });
+
+    expect(result.status).toBe(500);
+    expect(result.body).toEqual({ error: 'An unexpected error occurred.' });
+    expect(result.text).not.toContain('processor parser detail');
+    expect(result.text).not.toContain('internal processor body');
   });
 
   it('returns a safe error when the simulator rejects', async () => {
