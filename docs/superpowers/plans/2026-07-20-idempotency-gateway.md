@@ -13,7 +13,8 @@
 ## File Map
 
 - `package.json`: scripts and runtime/development dependencies.
-- `tsconfig.json`: strict TypeScript build configuration.
+- `tsconfig.json`: strict full-project type-checking configuration.
+- `tsconfig.build.json`: production-only TypeScript build configuration.
 - `vitest.config.ts`: isolated Node test configuration.
 - `.gitignore`: generated files, dependencies, logs, and local environment files.
 - `src/domain/types.ts`: request, response, record, and service-result types.
@@ -39,6 +40,7 @@
 **Files:**
 - Create: `package.json`
 - Create: `tsconfig.json`
+- Create: `tsconfig.build.json`
 - Create: `vitest.config.ts`
 - Create: `.gitignore`
 
@@ -50,11 +52,12 @@
   "version": "1.0.0",
   "private": true,
   "description": "A small payment API that safely handles retried requests.",
-  "main": "dist/src/server.js",
+  "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc -p tsconfig.json",
-    "start": "node dist/src/server.js",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/server.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -66,7 +69,7 @@
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
-    "@types/node": "^26.1.1",
+    "@types/node": "^20.19.43",
     "@types/supertest": "^7.2.1",
     "supertest": "^7.2.2",
     "tsx": "^4.23.1",
@@ -97,6 +100,18 @@
 }
 ```
 
+```json
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["test", "vitest.config.ts", "node_modules", "dist"]
+}
+```
+
 ```typescript
 import { defineConfig } from 'vitest/config';
 
@@ -116,20 +131,21 @@ dist/
 coverage/
 .env
 .env.*
+!.env.example
 *.log
 .DS_Store
 ```
 
 - [ ] **Step 4: Install dependencies and verify the empty project builds**
 
-Run: `npm install && npm run build`
+Run: `npm install && npm run typecheck && npm run build`
 
-Expected: dependencies install, `package-lock.json` is created, and TypeScript exits with code 0.
+Expected: dependencies install, `package-lock.json` is created, and full-project type-checking exits with code 0. The production build temporarily exits with TS18003 because Task 1 intentionally creates no `src/**/*.ts` files; Task 2 adds the first production source and immediately verifies the build.
 
 - [ ] **Step 5: Commit the scaffold**
 
 ```bash
-git add package.json package-lock.json tsconfig.json vitest.config.ts .gitignore
+git add package.json package-lock.json tsconfig.json tsconfig.build.json vitest.config.ts .gitignore
 git commit -m "chore: set up TypeScript project"
 ```
 
@@ -206,6 +222,10 @@ export function fingerprint(value: unknown): string {
 Run: `npm test -- test/request-fingerprint.test.ts`
 
 Expected: 3 tests pass.
+
+Run: `npm run build`
+
+Expected: TypeScript exits with code 0 and the production-only build emits `dist/domain/request-fingerprint.js`.
 
 - [ ] **Step 5: Commit fingerprinting**
 
@@ -795,7 +815,7 @@ process.on('SIGTERM', shutdown);
 
 Run: `npm run build`
 
-Expected: TypeScript exits with code 0 and produces `dist/src/server.js`.
+Expected: TypeScript exits with code 0 and produces `dist/server.js`.
 
 Run the built server with a temporary port, request `GET /health`, confirm `200 {"status":"ok"}`, and stop the process.
 
@@ -895,6 +915,10 @@ git commit -m "docs: document the idempotency gateway"
 Run: `npm test`
 
 Expected: every test passes with no unhandled errors.
+
+Run: `npm run typecheck`
+
+Expected: full-project TypeScript checking exits with code 0.
 
 Run: `npm run build`
 
