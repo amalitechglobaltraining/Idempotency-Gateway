@@ -98,7 +98,7 @@ sequenceDiagram
     Processor-->>Service: Successful payment response
     Service->>Repo: complete(K, 201, response)
     Repo-->>Service: COMPLETED response stored
-    Service->>InFlight: Shared Promise resolves
+    Note over Service,InFlight: Stored owned Promise resolves with the operation result
     Service->>InFlight: Clear K
     Service-->>API: Owner result, cacheHit false
     API-->>ClientA: 201 / X-Cache-Hit: false
@@ -161,7 +161,7 @@ sequenceDiagram
     Processor--xService: Throw processing error
     Service->>Repo: releaseProcessing(K, hash(P))
     Repo-->>Service: Delete matching PROCESSING claim
-    Service->>InFlight: Shared Promise rejects
+    Note over Service,InFlight: Stored owned Promise rejects with the processing error
     Service->>InFlight: Clear K
     Service--xAPI: Owner request throws
     Service--xAPI: Waiter request throws
