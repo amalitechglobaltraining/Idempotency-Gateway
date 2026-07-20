@@ -19,7 +19,7 @@ If processing fails, the gateway releases the matching claim, returns the error 
 - **In-flight duplicate:** an identical request waits on the first request's Promise, then receives the same result with `X-Cache-Hit: true`.
 - **Same-key conflict:** reusing a key with a different validated amount or currency returns `409` immediately, whether the original request is processing or completed.
 
-See [the algorithm](docs/algorithm.md), [state machine](docs/statemachine.md), [requirements](docs/requirements.md), and [data structures](docs/data-structures.md) for more detail.
+See [the algorithm](docs/algorithm.md), [state machine](docs/statemachine.md), [use-case diagram](docs/use-case-diagram.md), [sequence diagrams](docs/sequence-diagrams.md), [requirements](docs/requirements.md), and [data structures](docs/data-structures.md) for more detail.
 
 ## Setup
 
@@ -169,8 +169,8 @@ src/domain/                       request fingerprints and shared types
 src/services/                     idempotency coordination and payment simulation
 src/storage/                      in-memory idempotency repository
 test/                             automated tests
-docs/                             requirements and design notes
-diagrams/algorithm.png            request-flow diagram
+docs/                             requirements, design notes, and editable Mermaid sources
+diagrams/                         rendered algorithm, use-case, and sequence diagrams
 ```
 
 ## Production Improvements
