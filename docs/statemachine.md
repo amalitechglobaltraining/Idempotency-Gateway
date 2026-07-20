@@ -8,6 +8,8 @@ No record -> PROCESSING -> COMPLETED
 
 The first valid caller creates `PROCESSING`. A successful payment replaces it with `COMPLETED` and a response snapshot.
 
+Request hashes represent the validated `{ amount, currency }` payment. Extra JSON properties are discarded during validation, so only a different validated amount or currency creates a conflict.
+
 ## Request Behavior
 
 | Existing record | Request hash | Behavior |
@@ -20,7 +22,9 @@ The first valid caller creates `PROCESSING`. A successful payment replaces it wi
 
 ## Expiration and Failure
 
-`COMPLETED` expires exactly 24 hours after `completedAt`. Lookup removes an expired record lazily, while `deleteExpired()` supports bulk cleanup. `PROCESSING` never expires.
+`COMPLETED` expires exactly 24 hours after `completedAt`. A lookup for the same key, including one made by `claim()`, removes an expired record and treats the key as absent. `PROCESSING` never expires.
+
+`deleteExpired()` is available as a bulk-cleanup hook, but no scheduler invokes it. An untouched expired record can remain physically in the map until lookup, a future manual cleanup hook, or process restart.
 
 If payment processing throws, the gateway deletes the matching `PROCESSING` claim. The failure is shared with current waiters, and a later request may create a fresh claim. This is a return to no record, not an additional stored state.
 

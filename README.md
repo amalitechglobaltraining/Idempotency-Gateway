@@ -4,16 +4,20 @@ A small payment API that prevents a retried request from running the same paymen
 
 ## Architecture
 
-![Idempotency request flow](diagrams/algorithm.png)
+![Validated payment branches to conflict, replay, wait, or new processing](diagrams/algorithm.png)
+
+*Successful and duplicate-request flow. In the diagram, "request body" means the validated payment fields `{ amount, currency }`; extra JSON properties are ignored.*
 
 Express validates the HTTP request, `PaymentService` fingerprints and coordinates it, and `InMemoryIdempotencyRepository` stores the claim or completed response. A payment simulator stands in for a downstream provider.
+
+If processing fails, the gateway releases the matching claim, returns the error to the owner and current waiters, and lets a later retry claim the key.
 
 ## How It Works
 
 - **First request:** the gateway claims the key, marks it `PROCESSING`, runs the payment simulator, stores an immutable response snapshot, and returns `201` with `X-Cache-Hit: false`.
-- **Completed duplicate:** the same key and payment body receive the stored status and body with `X-Cache-Hit: true`. The simulator does not run again.
+- **Completed duplicate:** the same key and validated payment receive the stored status and body with `X-Cache-Hit: true`. The simulator does not run again.
 - **In-flight duplicate:** an identical request waits on the first request's Promise, then receives the same result with `X-Cache-Hit: true`.
-- **Same-key conflict:** reusing a key with a different payment body returns `409` immediately, whether the original request is processing or completed.
+- **Same-key conflict:** reusing a key with a different validated amount or currency returns `409` immediately, whether the original request is processing or completed.
 
 See [the algorithm](docs/algorithm.md), [state machine](docs/statemachine.md), [requirements](docs/requirements.md), and [data structures](docs/data-structures.md) for more detail.
 
@@ -54,7 +58,7 @@ Returns `200 OK`:
 
 ### `POST /process-payment`
 
-The request needs exactly one `Idempotency-Key` header. Its raw value may be at most 255 characters and must not be blank after trimming. `amount` must be a finite positive number, and `currency` must be exactly three uppercase letters.
+The request needs exactly one `Idempotency-Key` header. Its raw value may be at most 255 characters and must not be blank after trimming. `amount` must be a finite positive number, and `currency` must be exactly three uppercase letters. Validation extracts only these two payment fields, so extra JSON properties are ignored for processing and idempotency comparison.
 
 ```bash
 curl -i http://localhost:3000/process-payment \
@@ -104,7 +108,7 @@ Malformed JSON also returns `400`:
 {"error":"Request body must be valid JSON."}
 ```
 
-Reusing a key with a different valid body returns `409 Conflict`:
+Reusing a key with a different validated amount or currency returns `409 Conflict`:
 
 ```http
 HTTP/1.1 409 Conflict
@@ -136,7 +140,7 @@ Validation, parsing, size, and unexpected-error responses do not include `X-Cach
 
 ## Design Decisions
 
-- Request bodies are canonicalized by recursively sorting object keys, then hashed with SHA-256. Equivalent object key orders therefore share a fingerprint.
+- Validation extracts `{ amount, currency }` from the JSON body. That validated payment is canonicalized by recursively sorting object keys and hashed with SHA-256; extra JSON properties do not affect the fingerprint.
 - A synchronous `Map` check-and-set claims each new key before asynchronous work begins.
 - An in-flight `Promise` lets identical concurrent requests share one operation and outcome.
 - Stored records and returned bodies use `structuredClone`, so callers cannot mutate shared or cached data.
@@ -145,7 +149,7 @@ Validation, parsing, size, and unexpected-error responses do not include `X-Cach
 
 ## Developer's Choice: Safe Expiration
 
-A completed record expires exactly 24 hours after `completedAt`. `PROCESSING` records never expire because removing an active claim could allow the same payment to start again. Expired completed records are removed lazily when read, and the repository also provides bulk cleanup for a scheduled maintenance job.
+A completed record expires exactly 24 hours after `completedAt`. `PROCESSING` records never expire because removing an active claim could allow the same payment to start again. A lookup for that key, including the lookup performed while claiming it, removes an expired completed record and treats the key as absent. The repository exposes `deleteExpired()` as an unwired maintenance hook; no scheduler calls it today, so an untouched expired record can remain physically in memory until a lookup, a future manual cleanup hook, or process restart.
 
 ## Testing
 
