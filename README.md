@@ -1,133 +1,178 @@
-# Idempotency-Gateway (The "Pay-Once" Protocol)
-This challenge is designed to test your ability to bridge Computer Science fundamentals with Modern Backend Engineering.
+# Idempotency Gateway
 
-## 1. Business Context
-> **Client:** *FinSafe Transactions Ltd.* (A fast-growing Payment Processor).
+A small payment API that prevents a retried request from running the same payment twice. It stores the result for each idempotency key and safely coordinates identical requests that arrive at the same time.
 
-### The Problem
-FinSafe's clients (e-commerce shops) occasionally experience network timeouts. When this happens, their servers automatically retry sending payment requests. Recently, this has led to a critical issue: **Double Charging**.
+## Architecture
 
-If a customer clicks "Pay," the request is sent, but the network lags. The client retries the request. FinSafe processes *both* requests, charging the customer twice. This is causing customer churn and regulatory headaches.
+![Idempotency request flow](diagrams/algorithm.png)
 
-### The Solution
-FinSafe needs you to build an **Idempotency Layer**. This is a middleware service (or API) that ensures no matter how many times a client sends the same request, the payment is processed **exactly once**.
+Express validates the HTTP request, `PaymentService` fingerprints and coordinates it, and `InMemoryIdempotencyRepository` stores the claim or completed response. A payment simulator stands in for a downstream provider.
 
----
+## How It Works
 
-## 2. Technical Objective
-Build a RESTful API that mimics a payment processing backend. It must check for a unique `Idempotency-Key` in the HTTP headers.
+- **First request:** the gateway claims the key, marks it `PROCESSING`, runs the payment simulator, stores an immutable response snapshot, and returns `201` with `X-Cache-Hit: false`.
+- **Completed duplicate:** the same key and payment body receive the stored status and body with `X-Cache-Hit: true`. The simulator does not run again.
+- **In-flight duplicate:** an identical request waits on the first request's Promise, then receives the same result with `X-Cache-Hit: true`.
+- **Same-key conflict:** reusing a key with a different payment body returns `409` immediately, whether the original request is processing or completed.
 
-* **First Request:** Process the payment and save the response.
-* **Duplicate Request:** Detect the existing key and return the *saved* response immediately, without processing the payment again.
+See [the algorithm](docs/algorithm.md), [state machine](docs/statemachine.md), [requirements](docs/requirements.md), and [data structures](docs/data-structures.md) for more detail.
 
+## Setup
 
----
+Prerequisite: Node.js 20 or newer.
 
-## 3. Getting Started
+```bash
+npm ci
+npm run build
+npm start
+```
 
-1.  **Fork this Repository:** Do not clone it directly. Create a fork to your own GitHub account.
-2.  **Environment:** You may use **Node.js, Python, Java or Go, etc.**. You may use any database or in-memory store (Redis, SQLite, or a simple native Map/Dictionary variable).
-3.  **Submission:** Your final submission will be a link to your forked repository containing the source code and documentation.
+The server listens on port `3000` by default. Set `PORT` to use another port:
 
----
+```bash
+PORT=8080 npm start
+```
 
-## 4. The Architecture Diagram 
-**Task:** Before you write any code, you must design the logic flow.
-**Deliverable:** A **Sequence Diagram** or **Flowchart** included in your README.
+PowerShell equivalent:
 
----
+```powershell
+$env:PORT = '8080'
+npm start
+```
 
-## 5. User Stories & Acceptance Criteria
+All idempotency data is held in memory and resets when the process restarts.
 
-### User Story 1: The First Transaction (Happy Path)
-**As a** client system (e.g., an online store),  
-**I want to** send a payment request with a unique ID,  
-**So that** my transaction is processed successfully.
+## API
 
-**Acceptance Criteria:**
-- [ ] The API accepts a `POST` request to endpoint `/process-payment`.
-- [ ] The request header must contain `Idempotency-Key: <some-unique-string>`.
-- [ ] The request body accepts a JSON object (e.g., `{"amount": 100, "currency": "GHS"}`).
-- [ ] The server simulates processing (e.g., a 2-second delay) and returns a `200 OK` or `201 Created` response.
-- [ ] The response body should include a status message: `"Charged 100 GHS"`.
+### `GET /health`
 
-### User Story 2: The Duplicate Attempt (Idempotency Logic)
-**As a** client system,  
-**I want to** safely retry a request if I don't hear back,  
-**So that** I don't accidentally double-charge the user.
+Returns `200 OK`:
 
-**Acceptance Criteria:**
-- [ ] If the client sends a second `POST` request with the **same** `Idempotency-Key` and payload:
-    - [ ] The server must **NOT** run the processing logic again (no 2-second delay).
-    - [ ] The server must return the **exact same** response body and status code as the first successful request.
-    - [ ] The server returns a header `X-Cache-Hit: true` to indicate this was a replayed response.
+```json
+{"status":"ok"}
+```
 
-### User Story 3: Different Request, Same Key (Fraud/Error Check)
-**As a** security officer,  
-**I want to** reject requests that reuse keys for different payments,  
-**So that** we maintain data integrity.
+### `POST /process-payment`
 
-**Acceptance Criteria:**
-- [ ] If a request arrives with an existing `Idempotency-Key` but a **different** request body (e.g., changing amount from 100 to 500):
-    - [ ] The server must return a `422 Unprocessable Entity` or `409 Conflict` error.
-    - [ ] The error message should state: `"Idempotency key already used for a different request body."`
+The request needs exactly one `Idempotency-Key` header. Its raw value may be at most 255 characters and must not be blank after trimming. `amount` must be a finite positive number, and `currency` must be exactly three uppercase letters.
 
----
+```bash
+curl -i http://localhost:3000/process-payment \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: payment-001" \
+  -d '{"amount":100,"currency":"GHS"}'
+```
 
-## 6. Bonus User Story (The "In-Flight" Check)
-**As a** system architect,  
-**I want to** handle cases where two identical requests arrive at the exact same time,  
-**So that** we don't succumb to race conditions.
+The first valid request returns `201 Created` after the simulated two-second operation:
 
-**Scenario:** Request A arrives. While Request A is still "processing" (during the 2-second delay), Request B (same key) arrives.
+```http
+HTTP/1.1 201 Created
+X-Cache-Hit: false
+Content-Type: application/json; charset=utf-8
 
-**Acceptance Criteria:**
-- [ ] Request B should not start a new process.
-- [ ] Request B should not return `409 Conflict`.
-- [ ] Request B should wait (block) until Request A finishes, and then return the result of Request A.
+{"transactionId":"<generated UUID>","status":"SUCCESS","message":"Charged 100 GHS","amount":100,"currency":"GHS"}
+```
 
----
+Sending the same key and body again returns the same `201` response, including the original transaction ID:
 
-## 7. The "Developer's Choice" Challenge
-We believe great engineers are also product thinkers.
+```http
+HTTP/1.1 201 Created
+X-Cache-Hit: true
+Content-Type: application/json; charset=utf-8
 
-**Task:** Identify **one** additional feature or safety mechanism that would make this system better for a real-world Fintech company.
-1.  **Implement it.**
-2.  **Document it:** Explain *why* you added it in your README.
+{"transactionId":"<same UUID>","status":"SUCCESS","message":"Charged 100 GHS","amount":100,"currency":"GHS"}
+```
 
----
+Invalid headers or payment bodies return `400 Bad Request`. For example, a missing key returns:
 
-## 8. Documentation Requirements
-Your final `README.md` must replace these instructions. It must cover:
+```http
+HTTP/1.1 400 Bad Request
+Content-Type: application/json; charset=utf-8
 
-1.  **Architecture Diagram**
-2.  **Setup Instructions**
-3.  **API Documentation** 
-4.  **Design Decisions** 
-5.  **The Developer's Choice:** Description of the extra feature you added.
+{"error":"A valid Idempotency-Key header is required."}
+```
 
----
-Submit your repo link via the [online](https://forms.office.com/e/rGKtfeZCsH) form.
+An invalid payment body returns:
 
----
-## 🛑 Pre-Submission Checklist
-**WARNING:** Before you submit your solution, you **MUST** pass every item on this list.
-If you miss any of these critical steps, your submission will be **automatically rejected** and you will **NOT** be invited to an interview.
+```json
+{"error":"A valid payment with amount and currency is required."}
+```
 
-### 1. 📂 Repository & Code
-- [ ] **Public Access:** Is your GitHub repository set to **Public**? (We cannot review private repos).
-- [ ] **Clean Code:** Did you remove unnecessary files (like `node_modules`, `.env` with real keys, or `.DS_Store`)?
-- [ ] **Run Check:** if we clone your repo and run `npm start` (or equivalent), does the server start immediately without crashing?
+Malformed JSON also returns `400`:
 
-### 2. 📄 Documentation (Crucial)
-- [ ] **Architecture Diagram:** Did you include a visual Diagram (Flowchart or Sequence Diagram) in the README?
-- [ ] **README Swap:** Did you **DELETE** the original instructions (the problem brief) from this file and replace it with your own documentation?
-- [ ] **API Docs:** Is there a clear list of Endpoints and Example Requests in the README?
+```json
+{"error":"Request body must be valid JSON."}
+```
 
+Reusing a key with a different valid body returns `409 Conflict`:
 
-### 3. 🧹 Git Hygiene
-- [ ] **Commit History:** Does your repo have multiple commits with meaningful messages? (A single "Initial Commit" is a red flag).
+```http
+HTTP/1.1 409 Conflict
+X-Cache-Hit: false
+Content-Type: application/json; charset=utf-8
 
----
-**Ready?**
-If you checked all the boxes above, submit your repository link in the application form. Good luck! 🚀
+{"error":"Idempotency key already used for a different request body."}
+```
+
+JSON larger than 100 KB returns `413 Payload Too Large`:
+
+```http
+HTTP/1.1 413 Payload Too Large
+Content-Type: application/json; charset=utf-8
+
+{"error":"Request body is too large."}
+```
+
+Unexpected processing errors are hidden behind a generic `500 Internal Server Error` response:
+
+```http
+HTTP/1.1 500 Internal Server Error
+Content-Type: application/json; charset=utf-8
+
+{"error":"An unexpected error occurred."}
+```
+
+Validation, parsing, size, and unexpected-error responses do not include `X-Cache-Hit`.
+
+## Design Decisions
+
+- Request bodies are canonicalized by recursively sorting object keys, then hashed with SHA-256. Equivalent object key orders therefore share a fingerprint.
+- A synchronous `Map` check-and-set claims each new key before asynchronous work begins.
+- An in-flight `Promise` lets identical concurrent requests share one operation and outcome.
+- Stored records and returned bodies use `structuredClone`, so callers cannot mutate shared or cached data.
+- If processing throws, the matching `PROCESSING` claim is released. Waiting duplicates see the same error, and a later request may retry.
+- Coordination is limited to one app instance because both maps live in one Node.js process.
+
+## Developer's Choice: Safe Expiration
+
+A completed record expires exactly 24 hours after `completedAt`. `PROCESSING` records never expire because removing an active claim could allow the same payment to start again. Expired completed records are removed lazily when read, and the repository also provides bulk cleanup for a scheduled maintenance job.
+
+## Testing
+
+```bash
+npm test
+npm run typecheck
+npm run build
+```
+
+The tests cover request validation, error boundaries, canonical hashing, concurrent duplicates and conflicts, immutable snapshots, failure retry behavior, expiration boundaries, and server lifecycle behavior.
+
+## Project Structure
+
+```text
+src/app.ts                         HTTP routes and error handling
+src/domain/                       request fingerprints and shared types
+src/services/                     idempotency coordination and payment simulation
+src/storage/                      in-memory idempotency repository
+test/                             automated tests
+docs/                             requirements and design notes
+diagrams/algorithm.png            request-flow diagram
+```
+
+## Production Improvements
+
+- Store records in a persistent database with a unique index on the scoped idempotency key.
+- Use distributed coordination so multiple gateway instances share ownership and results.
+- Pass idempotency keys to the payment provider and reconcile uncertain downstream outcomes.
+- Add authentication and scope keys by client or account.
+- Add audit records, structured observability, and rate limits.
