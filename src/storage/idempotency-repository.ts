@@ -16,7 +16,7 @@ export class InMemoryIdempotencyRepository {
       return undefined;
     }
 
-    return record;
+    return record ? structuredClone(record) : undefined;
   }
 
   claim(idempotencyKey: string, requestHash: string): boolean {
@@ -39,6 +39,9 @@ export class InMemoryIdempotencyRepository {
     if (!existing) {
       throw new Error('Cannot complete an idempotency record that does not exist');
     }
+    if (existing.status !== 'PROCESSING') {
+      throw new Error('Cannot complete an idempotency record that is already completed');
+    }
 
     const completedAt = this.now();
     const completed: CompletedRecord = {
@@ -46,7 +49,8 @@ export class InMemoryIdempotencyRepository {
       requestHash: existing.requestHash,
       status: 'COMPLETED',
       responseStatus,
-      responseBody,
+      // Preserve the response exactly as it was when the operation completed.
+      responseBody: structuredClone(responseBody),
       createdAt: existing.createdAt,
       completedAt,
       expiresAt: completedAt + COMPLETED_RECORD_RETENTION_MS,
