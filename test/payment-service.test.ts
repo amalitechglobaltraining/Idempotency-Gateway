@@ -34,7 +34,7 @@ describe('PaymentService', () => {
 
     expect(conflict).toEqual({
       statusCode: 409,
-      body: 'Idempotency key already used for a different request body.',
+      body: { error: 'Idempotency key already used for a different request body.' },
       cacheHit: false,
     });
     expect(simulator).toHaveBeenCalledOnce();
@@ -74,7 +74,7 @@ describe('PaymentService', () => {
       ]);
       expect(outcome).toEqual({
         statusCode: 409,
-        body: 'Idempotency key already used for a different request body.',
+        body: { error: 'Idempotency key already used for a different request body.' },
         cacheHit: false,
       });
       expect(simulator).toHaveBeenCalledOnce();

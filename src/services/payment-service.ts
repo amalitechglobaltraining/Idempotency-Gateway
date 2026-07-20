@@ -9,7 +9,7 @@ import { InMemoryIdempotencyRepository } from '../storage/idempotency-repository
 
 const conflictResult: OperationResult = {
   statusCode: 409,
-  body: 'Idempotency key already used for a different request body.',
+  body: { error: 'Idempotency key already used for a different request body.' },
   cacheHit: false,
 };
 
