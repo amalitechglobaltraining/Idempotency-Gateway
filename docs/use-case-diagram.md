@@ -17,7 +17,7 @@ flowchart LR
         Retry([Retry payment safely])
         Replay([Replay completed response<br/>X-Cache-Hit: true])
         Wait([Wait for identical in-flight request<br/>X-Cache-Hit: true])
-        Conflict([Reject same-key / different-payment reuse<br/>409 · X-Cache-Hit: false])
+        Conflict([Reject same-key / different-payment reuse<br/>409 - X-Cache-Hit: false])
         Health([Check health<br/>GET /health])
         Cleanup([Delete expired completed records<br/>Optional; no scheduler is wired])
     end

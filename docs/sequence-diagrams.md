@@ -126,7 +126,7 @@ sequenceDiagram
     Service->>Service: Fingerprint canonical payment
     Service->>Repo: find(key)
     Repo-->>Service: PROCESSING or COMPLETED record with different hash
-    Note over Service,Processor: Conflict is immediate; InFlight and Processor are unused
+    Note over Service,Processor: Conflict is immediate. InFlight and Processor are unused
     Service-->>API: 409 conflict, cacheHit false
     API-->>Client: 409 / X-Cache-Hit: false
 ```
