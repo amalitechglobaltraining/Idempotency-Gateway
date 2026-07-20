@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { PaymentRequest, PaymentResponse } from '../src/domain/types.js';
 import { createApp } from '../src/app.js';
 import { validateIdempotencyKey } from '../src/http/validation.js';
+import { InMemoryIdempotencyRepository } from '../src/storage/idempotency-repository.js';
 
 const response: PaymentResponse = {
   transactionId: 'transaction-123',
@@ -12,6 +13,23 @@ const response: PaymentResponse = {
   amount: 100,
   currency: 'USD',
 };
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
+function paymentJsonOfSize(byteLength: number): string {
+  const empty = JSON.stringify({ amount: 100, currency: 'USD', padding: '' });
+  return JSON.stringify({
+    amount: 100,
+    currency: 'USD',
+    padding: 'x'.repeat(byteLength - Buffer.byteLength(empty)),
+  });
+}
 
 describe('HTTP API', () => {
   it('reports health', async () => {
@@ -121,6 +139,82 @@ describe('HTTP API', () => {
     expect(processPayment).toHaveBeenCalledTimes(1);
   });
 
+  it('shares one in-flight result between concurrent identical requests', async () => {
+    const started = deferred<void>();
+    const duplicateObserved = deferred<void>();
+    const controlledResponse = deferred<PaymentResponse>();
+    const repository = new InMemoryIdempotencyRepository();
+    const find = repository.find.bind(repository);
+    let paymentStarted = false;
+    vi.spyOn(repository, 'find').mockImplementation((key) => {
+      if (paymentStarted) {
+        duplicateObserved.resolve();
+      }
+      return find(key);
+    });
+    const processPayment = vi.fn(() => {
+      paymentStarted = true;
+      started.resolve();
+      return controlledResponse.promise;
+    });
+    const app = createApp({ processPayment, repository });
+
+    const owner = request(app)
+      .post('/process-payment')
+      .set('Idempotency-Key', 'concurrent-payment')
+      .send({ amount: 100, currency: 'USD' })
+      .then((result) => result);
+    await started.promise;
+    const duplicate = request(app)
+      .post('/process-payment')
+      .set('Idempotency-Key', 'concurrent-payment')
+      .send({ amount: 100, currency: 'USD' })
+      .then((result) => result);
+
+    await duplicateObserved.promise;
+    controlledResponse.resolve(response);
+    const [ownerResult, duplicateResult] = await Promise.all([owner, duplicate]);
+
+    expect(ownerResult.status).toBe(201);
+    expect(ownerResult.body).toEqual(response);
+    expect(ownerResult.headers['x-cache-hit']).toBe('false');
+    expect(duplicateResult.status).toBe(201);
+    expect(duplicateResult.body).toEqual(response);
+    expect(duplicateResult.headers['x-cache-hit']).toBe('true');
+    expect(processPayment).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a conflicting request while the owner remains in flight', async () => {
+    const started = deferred<void>();
+    const controlledResponse = deferred<PaymentResponse>();
+    const processPayment = vi.fn(() => {
+      started.resolve();
+      return controlledResponse.promise;
+    });
+    const app = createApp({ processPayment });
+    const owner = request(app)
+      .post('/process-payment')
+      .set('Idempotency-Key', 'in-flight-conflict')
+      .send({ amount: 100, currency: 'USD' })
+      .then((result) => result);
+
+    await started.promise;
+    try {
+      const conflict = await request(app)
+        .post('/process-payment')
+        .set('Idempotency-Key', 'in-flight-conflict')
+        .send({ amount: 500, currency: 'USD' });
+
+      expect(conflict.status).toBe(409);
+      expect(conflict.body).toEqual({ error: 'Idempotency key already used for a different request body.' });
+      expect(conflict.headers['x-cache-hit']).toBe('false');
+      expect(processPayment).toHaveBeenCalledOnce();
+    } finally {
+      controlledResponse.resolve(response);
+      await owner;
+    }
+  });
+
   it('rejects reuse of a key for a different payment', async () => {
     const app = createApp({ processPayment: vi.fn(async () => response) });
     await request(app).post('/process-payment').set('Idempotency-Key', 'payment-1').send({ amount: 100, currency: 'USD' });
@@ -129,6 +223,7 @@ describe('HTTP API', () => {
 
     expect(conflict.status).toBe(409);
     expect(conflict.body).toEqual({ error: 'Idempotency key already used for a different request body.' });
+    expect(conflict.headers['x-cache-hit']).toBe('false');
   });
 
   it('returns a safe error for malformed JSON', async () => {
@@ -142,11 +237,29 @@ describe('HTTP API', () => {
     expect(result.body).toEqual({ error: 'Request body must be valid JSON.' });
   });
 
-  it('returns a distinct safe error for JSON over 100kb', async () => {
+  it('accepts JSON exactly at the 100kb parser boundary', async () => {
+    const rawBody = paymentJsonOfSize(102_400);
+    expect(Buffer.byteLength(rawBody)).toBe(102_400);
+
+    const result = await request(createApp({ processPayment: vi.fn(async () => response) }))
+      .post('/process-payment')
+      .set('Idempotency-Key', 'boundary-payment')
+      .set('Content-Type', 'application/json')
+      .send(rawBody);
+
+    expect(result.status).toBe(201);
+    expect(result.body).toEqual(response);
+  });
+
+  it('rejects JSON one byte over the 100kb parser boundary', async () => {
+    const rawBody = paymentJsonOfSize(102_401);
+    expect(Buffer.byteLength(rawBody)).toBe(102_401);
+
     const result = await request(createApp())
       .post('/process-payment')
-      .set('Idempotency-Key', 'payment-1')
-      .send({ amount: 100, currency: 'USD', padding: 'x'.repeat(101 * 1024) });
+      .set('Idempotency-Key', 'oversized-payment')
+      .set('Content-Type', 'application/json')
+      .send(rawBody);
 
     expect(result.status).toBe(413);
     expect(result.body).toEqual({ error: 'Request body is too large.' });
