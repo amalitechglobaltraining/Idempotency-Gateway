@@ -136,7 +136,7 @@ coverage/
 .DS_Store
 ```
 
-- [ ] **Step 4: Install dependencies and verify the empty project builds**
+- [ ] **Step 4: Install dependencies and verify the scaffold checks**
 
 Run: `npm install && npm run typecheck && npm run build`
 
