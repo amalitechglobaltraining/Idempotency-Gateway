@@ -13,6 +13,25 @@ const response: PaymentResponse = {
 };
 
 describe('PaymentService', () => {
+  it('publishes the in-flight promise before starting payment processing', async () => {
+    let release!: (value: PaymentResponse) => void;
+    const controlled = new Promise<PaymentResponse>((resolve) => {
+      release = resolve;
+    });
+    const simulator = vi.fn().mockReturnValue(controlled);
+    const service = new PaymentService(new InMemoryIdempotencyRepository(), simulator);
+    const operation = service.process('payment-1', { amount: 100, currency: 'GHS' });
+
+    try {
+      expect(simulator).not.toHaveBeenCalled();
+      await Promise.resolve();
+      expect(simulator).toHaveBeenCalledOnce();
+    } finally {
+      release(response);
+      await operation;
+    }
+  });
+
   it('processes the first request and replays an equivalent reordered request', async () => {
     const simulator = vi.fn().mockResolvedValue(response);
     const service = new PaymentService(new InMemoryIdempotencyRepository(), simulator);

@@ -45,8 +45,8 @@ export class PaymentService {
       return this.handleExisting(claimed, requestHash);
     }
 
-    // Publish the shared promise before this request yields to a duplicate.
-    const owned = this.runOwned(idempotencyKey, requestHash, payment);
+    // Defer processing so the shared promise can be published first.
+    const owned = Promise.resolve().then(() => this.runOwned(idempotencyKey, requestHash, payment));
     this.inFlight.set(idempotencyKey, owned);
 
     try {
