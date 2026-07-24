@@ -6,7 +6,7 @@ At its core, the service enforces one rule: only the first successful call for a
 
 ## Architecture
 
-![Payment Idempotency Flowchart](./asset/payment_idempotency_flowchart.png)
+![Payment Idempotency Flowchart](asset/payment_idempotency_flowchart.png)
 
 ## Request Outcomes
 
@@ -245,16 +245,18 @@ Idempotency-Gateway/
 ├── src/
 │   ├── app.js
 │   ├── server.js
+│   ├── controller/
+│   │   └── payment.controller.js
 │   ├── middleware/
-│   │   ├── validateHeaders.js
-│   │   └── validatePaymentBody.js
+│   │   ├── validateHeaders.middleware.js
+│   │   └── validatePaymentBody.middleware.js
 │   ├── routes/
-│   │   └── payment.js
-│   ├── services/
-│   │   ├── idempotencyStore.js
-│   │   └── paymentProcess.js
+│   │   └── payment.route.js
+│   ├── service/
+│   │   ├── idempotencyStore.service.js
+│   │   └── paymentProcess.service.js
 │   └── utils/
-│   │   └── hashBody.js
+│   │   └── hashBody.util.js
 ├── test/
 │   └── payment.test.js
 ├── .gitignore

@@ -1,6 +1,6 @@
 
 
-const crypto = require('crypto');
+import crypto from 'crypto';
    
 function canonicalize(value) {
   if (Array.isArray(value)) {
@@ -19,13 +19,11 @@ function canonicalize(value) {
   return value;
 }
 //hash the body
-function hashBody(body) {
+export const hashBody = function(body) {
   const canonical = canonicalize(body);
   const str = JSON.stringify(canonical);
   return crypto.createHash('sha256').update(str).digest('hex');
 }
-
-module.exports = hashBody;
 
 
 

@@ -1,4 +1,4 @@
-const crypto = require('crypto');
+import crypto from 'crypto';
 
 const PROCESSING_DELAY_MS = 2000;
 
@@ -20,4 +20,4 @@ async function processPayment(amount, currency) {
   };
 }
 
-module.exports = { processPayment };
+export { processPayment };

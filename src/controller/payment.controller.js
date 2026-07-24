@@ -1,20 +1,12 @@
-const express = require('express');
-const router = express.Router();
-const validateHeaders = require('../middleware/validateHeaders');
-const validateBody = require('../middleware/validatePaymentBody');
-const { getEntry, saveProcessing, saveComplete, cleanup } = require('../services/idempotencyStore');
-const { processPayment } = require('../services/paymentProcess');
-const hashBody = require('../utils/hashBody');
+import { getEntry, saveProcessing, saveComplete, removeEntry } from '../service/idempotencyStore.service.js';
+import { processPayment } from '../service/paymentProcess.service.js';
+import { hashBody } from '../utils/hashBody.util.js';
 
-
-
-router.post('/process-payment', validateHeaders, validateBody, async (req, res) => {
+export const processPaymentHandler = async (req, res) => {
   const idempotencyKey = req.idempotencyKey;
   const bodyHash = hashBody(req.body);
   const { amount, currency } = req.body;
 
-  // Remove stale entries 
-  cleanup();
 
   const existingEntry = getEntry(idempotencyKey);
 
@@ -23,10 +15,18 @@ router.post('/process-payment', validateHeaders, validateBody, async (req, res) 
     const processingPromise = processPayment(amount, currency);
     saveProcessing(idempotencyKey, bodyHash, processingPromise);
 
-    const response = await processingPromise;
-    saveComplete(idempotencyKey, response);
+    try {
+      const response = await processingPromise;
+      saveComplete(idempotencyKey, response);
 
-    return res.status(response.statusCode).json(response.body);
+      return res.status(response.statusCode).json(response.body);
+    } catch (error) {
+      // Clean up failed state so client can retry later
+      removeEntry(idempotencyKey);
+      
+      // Let the Express error handler process the failure
+      throw error;
+    }
   }
 
   // conflict check: Same key, different body
@@ -54,10 +54,6 @@ router.post('/process-payment', validateHeaders, validateBody, async (req, res) 
       .json(existingEntry.response.body);
   }
 
-
-
   // Defensive fallback should never reach here
   return res.status(500).json({ error: 'Invalid idempotency record state' });
-});
-
-module.exports = router;
+};

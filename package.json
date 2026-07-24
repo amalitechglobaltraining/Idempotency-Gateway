@@ -15,15 +15,17 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
+  "type": "module",
   "bugs": {
     "url": "https://github.com/TINUNGTAA/Idempotency-Gateway/issues"
   },
   "homepage": "https://github.com/TINUNGTAA/Idempotency-Gateway#readme",
   "dependencies": {
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "mermaid": "^11.16.0"
   },
   "devDependencies": {
+    "@mermaid-js/mermaid-cli": "^11.16.0",
     "nodemon": "^3.1.14"
   }
 }

@@ -2,7 +2,7 @@ const store = new Map();
 const TTL_MS = 24 * 60 * 60 * 1000;
 
 //removes entries older than 24 hours
-function cleanup() {
+function cleanupExpiredEntries() {
   const now = Date.now();
   for (const [key, entry] of store) {
     if (now - entry.createdAt > TTL_MS) {
@@ -36,5 +36,13 @@ function saveComplete(idempotencyKey, response) {
     entry.response = response;
   }
 }
+// Removes a specific entry inside store
+function removeEntry(idempotencyKey) {
+  store.delete(idempotencyKey);
+}
 
-module.exports = { getEntry, saveProcessing, saveComplete, cleanup };
+// Background task to automatically remove expired entries
+const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+setInterval(cleanupExpiredEntries, CLEANUP_INTERVAL_MS).unref();
+
+export { getEntry, saveProcessing, saveComplete, removeEntry, cleanupExpiredEntries };
